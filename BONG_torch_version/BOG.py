@@ -294,7 +294,7 @@ def Update_BOG_lin_full_OU_reparm(mean, Cov, model, obs, y, learning_rate, R, ga
     H = torch.autograd.functional.jacobian(model, obs)
     R_inv = torch.linalg.inv(R)
     update_term = H.T @ R_inv @ (y - y_pred)
-    upd_mean = predict_mean +   learning_rate  @ update_term
+    upd_mean = predict_mean +   learning_rate  * update_term
     upd_cov = predict_cov -  learning_rate/2 *  H.T @ R_inv @ H
     return upd_mean, upd_cov
 
@@ -324,10 +324,12 @@ def Update_BOG_lin_full_F_reparm(mean, Cov, model, obs, y, learning_rate, R, F, 
     predict_mean, predict_cov = predict_full_F(mean, Cov, F, beta, Q)
 
     y_pred = model(obs)
-    H = torch.autograd.functional.jacobian(model, obs)
+    z_concat = torch.cat([model.z_layers, model.z_last])
+    z_concat.requires_grad_(True)
+    H = torch.autograd.functional.jacobian(lambda z: model.f_z(z, obs), z_concat)
     R_inv = torch.linalg.inv(R)
     update_term = H.T @ R_inv @ (y - y_pred)
-    upd_mean = predict_mean + learning_rate @ update_term
+    upd_mean = predict_mean + learning_rate * update_term
     upd_cov = predict_cov - learning_rate / 2 * H.T @ R_inv @ H
     return upd_mean, upd_cov
 

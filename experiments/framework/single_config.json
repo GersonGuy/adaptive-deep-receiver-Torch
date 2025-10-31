@@ -1,0 +1,37 @@
+{
+  "model": {
+    "type": "deepsic",
+    "num_layers": 4,
+    "hidden_dim": 24,
+    "init_param_cov": 0.1,
+    "Pulse": false,
+    "OU": true,
+    "F": false
+  },
+  "channel": {
+    "modulation": "QPSK",
+    "snr": 6,
+    "num_users": 3,
+    "num_antennas": 5,
+    "linear_channel": true,
+    "channel_path": "adr/experiments/data/COST2100_CloselySpacedUser/eval/channel_coefficients.mat"
+  },
+  "experiment": {
+    "sync_frames": 4,
+    "track_frames": 96,
+    "symbols_per_frame": 64,
+    "pilot_per_frame": 4,
+    "test_dim": 100000,
+    "seed": 42
+  },
+  "algorithm": {
+    "method": "bong",
+    "covariance_type": "full",
+    "reparameterized": false,
+    "dynamics_decay": 0.999,
+    "obs_cov_scale": 0.1,
+    "process_noise": 0.001,
+    "num_samples": 1,
+    "learning_rate": 0.1,
+  }
+}
