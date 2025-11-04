@@ -2,12 +2,14 @@ import torch
 import time
 import json
 import math
+from tqdm import tqdm
 from experiments.framework.read_config import load_config,validate_config,clean_config
 from src.channel.Uplink_MIMO_Channel import UplinkMimoChannel
 from src.Detector.DeepDIC_Det import DeepSIC_proj
 from src.channel.Modulation import MODULATIONS
 from BONG_torch_version import BONG,BOG
 from src.Utils.utils import prepare_experiment_data
+
 
 
 def create_model(config):
@@ -24,6 +26,8 @@ def create_model(config):
             num_antennas=channel_config['num_antennas'],
             num_layers=model_config['num_layers'],
             hidden_dim=model_config['hidden_dim'],
+            cov_type= config['algorithm']['covariance_type'],
+            init_cov_scale= model_config['init_param_cov'],
             Pulse=model_config["Pulse"],
             OU= model_config["OU"],
             F = model_config["F"]
@@ -54,14 +58,14 @@ def create_online_train_fn(config):
     algo_config = config['algorithm']
     fn_name = 'Update'
 
-    if algo_config['method'].lower == 'bong':
+    if algo_config['method'].lower() == 'bong':
         fn_name += '_BONG_lin'
     else:
         fn_name += '_BOG_lin'
 
-    if algo_config['covariance_type'].lower == 'dlr':
+    if algo_config['covariance_type'].lower() == 'dlr':
         fn_name += '_DLR'
-    elif algo_config['covariance_type'].lower == 'full':
+    elif algo_config['covariance_type'].lower() == 'full':
         fn_name += '_full'
     else:
         fn_name += '_diag'
@@ -70,20 +74,42 @@ def create_online_train_fn(config):
         fn_name += '_OU'
     else:
         fn_name += '_F'
-    if algo_config['method'].lower == 'bog' and  algo_config['reparameterized'] == True:
+    if algo_config['method'].lower() == 'bog' and  algo_config['reparameterized'] == True:
         fn_name += '_reparm'
 
 
-    if algo_config['method'].lower == 'bong':
+    if algo_config['method'].lower() == 'bong':
         online_fn = getattr(BONG, fn_name)
     else:
         online_fn = getattr(BOG,fn_name)
 
     return online_fn
 
-def evaluate_model():
-    """evaluate model performance"""
-    return
+def evaluate_model(model, test_rx: torch.Tensor, test_labels: torch.Tensor) -> float:
+    """
+    Test model and return Bit Error Rate (BER).
+
+    Args:
+        model: DeepSIC-like model with soft_decode_batch method.
+        test_rx (torch.Tensor): Received signals, shape (num_samples, rx_dim)
+        test_labels (torch.Tensor): True bits, shape (num_samples, num_users, symbol_bits)
+
+    Returns:
+        float: Bit Error Rate (BER)
+    """
+    predictions = model.soft_decode_batch(test_rx)
+
+    num_users = model.num_users
+    symbol_bits = model.symbol_bits
+    predictions = predictions.reshape(-1, num_users, symbol_bits)
+
+    predicted_bits = (predictions > 0.5).float()
+
+    total_bits = test_labels.numel()
+    bit_errors = (predicted_bits != test_labels).sum().item()
+    ber = bit_errors / total_bits
+
+    return ber
 
 
 
@@ -93,7 +119,7 @@ def measure_runtime(detector,step_fn,rx,y):
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     start_time = time.perf_counter()
-    detector.online_training(step_fn,rx,y)
+    detector.train_batch(step_fn,rx,y)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     end_time = time.perf_counter()
@@ -102,7 +128,7 @@ def measure_runtime(detector,step_fn,rx,y):
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     start_time = time.perf_counter()
-    detector.soft_decode(rx)
+    detector.soft_decode_batch(rx)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     end_time = time.perf_counter()
@@ -154,10 +180,23 @@ def run_experiment(config):
     training_time , inference_time = measure_runtime(detector,step_fn,train_rx,train_label)
     # run sync frames+test each 3 frames.
 
-    # run train frames +test each frame.
+    sync_ber = []
+    for train_rx,train_label in  tqdm(sync_dataloader, total=sync_frames, leave=False, desc='Sync frames'):
+        detector.train_batch(step_fn,train_rx,train_label)
+        test_rx, test_labels = next(test_dataloader_iter)
+        ber = evaluate_model(detector,test_rx,test_labels)
+        sync_ber.append(ber)
 
+    # run train frames +test each frame.
+    track_ber = []
+    for train_rx, train_label in tqdm(track_dataloader, total=track_frames, leave=False, desc='track frames'):
+        detector.train_batch(step_fn, train_rx, train_label)
+        test_rx, test_label = next(test_dataloader_iter)
+        ber = evaluate_model(detector,test_rx, test_label)
+        track_ber.append(ber)
     # generate results
-    return
+    print(sync_ber,track_ber)
+    return {training_time,inference_time,sync_ber,track_ber},detector
 
 
 
@@ -171,9 +210,9 @@ def main():
 
     parser = argparse.ArgumentParser(description='Run experiment from JSON config')
     parser.add_argument('--config_path', type=str, help='Path to experiment config JSON file',
-                        default='experiments/framework/single_config.json')
+                        default="single_config.json")
     parser.add_argument('--output_dir', type=str, help='Base output directory for results',
-                        default='adr/experiments/results')
+                        default=r"C:\Users\owner\OneDrive\Desktop\Msc\Codes\adaptive-deep-receiver-Torch\experiments\data")
 
     args = parser.parse_args()
 

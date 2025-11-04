@@ -1,5 +1,5 @@
-import pytorch as torch
-import numpay as np
+import torch
+
 
 
 

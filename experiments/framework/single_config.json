@@ -14,7 +14,7 @@
     "num_users": 3,
     "num_antennas": 5,
     "linear_channel": true,
-    "channel_path": "adr/experiments/data/COST2100_CloselySpacedUser/eval/channel_coefficients.mat"
+    "channel_path": "C:/Users/owner/OneDrive/Desktop/Msc/Codes/adaptive-deep-receiver-Torch/experiments/data/QuaDRiGa_3GPP_LOS/eval/channel_coefficients.mat"
   },
   "experiment": {
     "sync_frames": 4,
@@ -32,6 +32,6 @@
     "obs_cov_scale": 0.1,
     "process_noise": 0.001,
     "num_samples": 1,
-    "learning_rate": 0.1,
+    "learning_rate": 0.1
   }
 }

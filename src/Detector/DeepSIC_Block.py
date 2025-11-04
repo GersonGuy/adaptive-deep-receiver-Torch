@@ -34,14 +34,14 @@ class DeepSIC_Block (nn.Module):
         self.phi_hidden = phi_hidden
         self.phi_last = phi_last
         # Latent variables
-        self.z_layers = nn.Parameter(torch.randn(1,self.A.shape[1]))
-        self.z_last = nn.Parameter(torch.randn(1,self.A_last.shape[1]))
+        self.z_layers = nn.Parameter(torch.randn(self.A_hidden.shape[0]))
+        self.z_last = nn.Parameter(torch.randn(self.A_last.shape[0]))
 
         #generate covariance matrices
         self.generate_cov_matrix(cov_type,Rank)
 
         if pred_type == 'OU':
-            self.generate_initial_cov_matrix()
+            self.generate_initial_cov_matrix(self.cov_type)
             self.initial_mean_layers = self.z_layers.clone()
             self.initial_mean_last = self.z_last.clone()
 
@@ -49,19 +49,29 @@ class DeepSIC_Block (nn.Module):
         self.shapes = [p.shape for p in self.base_model.parameters()]
         self.sizes = [p.numel() for p in self.base_model.parameters()]
         self.total_params = sum(self.sizes)
-        self.activation = self.extract_activations(base_model)
+        self.activation = self.extract_activations(self.base_model)
 
-    def f_z(self, z_concat, obs):
-        z_layers_size = self.z_layers.numel()
-        self.z_layers = nn.Parameter(z_concat[:z_layers_size])
-        self.z_last = nn.Parameter(z_concat[z_layers_size:])
+    def f_z(self, obs,z,mode = 'layers'):
+        if mode == 'layers':
+            self.z_layers = z.clone().requires_grad_(True)
+        elif mode == 'last':
+            self.z_last = z.clone().requires_grad_(True)
+        else:
+            raise ValueError("mode must be 'layers' or 'last'")
         return self.forward(obs)
 
-
+    def f(self,z,obs,mode = 'layers'):
+        if mode == 'layers':
+            self.z_layers = z
+        elif mode == 'last':
+            self.z_last = z
+        else:
+            raise ValueError("mode must be 'layers' or 'last'")
+        return self.forward(obs)
 
     def extract_activations(self,base_model):
         activations = []
-        layers = list(base_model)
+        layers = list(base_model.children())
 
         for i, layer in enumerate(layers):
             if isinstance(layer, nn.Linear):
@@ -79,14 +89,14 @@ class DeepSIC_Block (nn.Module):
         offset = 0
         params = []
         for shape, size in zip(self.shapes, self.sizes):
-            params.append(theta[offset:offset + size].view(shape))
+            params.append(theta[:,offset:offset + size].view(shape))
             offset += size
         for i in range(len(params)//2):
             x = F.linear(x, params[2*i], bias=params[2*i+1])
             activation = self.activation[i]
             if activation !=None:
                 x = activation(x)
-        return x
+        return x.squeeze(0)
 
 
 
@@ -94,7 +104,7 @@ class DeepSIC_Block (nn.Module):
         """Expand parameters from vector to model parameters"""
         theta_hidden =  self.z_layers @ self.A_hidden  + self.phi_hidden
         theta_last = self.z_last @ self.A_last + self.phi_last
-        theta = torch.cat([theta_hidden, theta_last], dim=0)
+        theta = torch.cat([theta_hidden, theta_last], dim=1)
         return theta
 
 
@@ -102,19 +112,19 @@ class DeepSIC_Block (nn.Module):
     def generate_cov_matrix(self,cov_type,Rank):
         """Generate covariance matrix based on the specified type."""
         if  cov_type == 'Full':
-            self.cov_layers = torch.eye(self.A_hidden.shape[0])
-            self.cov_last = torch.eye(self.A_last.shape[0])
+            self.cov_layers = torch.eye(self.A_hidden.shape[0])*0.1
+            self.cov_last = torch.eye(self.A_last.shape[0])*0.1
         elif cov_type == 'Diagonal':
-            self.cov_layers = torch.ones(1,self.A_hidden.shape[0])
-            self.cov_last = torch.ones(1,self.A_last.shape[0])
+            self.cov_layers = torch.ones(1,self.A_hidden.shape[0])*0.1
+            self.cov_last = torch.ones(1,self.A_last.shape[0])*0.1
         else:
-            self.diag_layers = torch.ones(1,self.A_hidden.shape[0])
-            self.diag_last = torch.ones(1,self.A_last.shape[0])
-            self.lr_cov_layers = torch.randn(self.A_hidden.shape[0],Rank)
-            self.lr_cov_last = torch.randn(self.A_last.shape[0],Rank)
+            self.diag_layers = torch.ones(1,self.A_hidden.shape[0])*0.1
+            self.diag_last = torch.ones(1,self.A_last.shape[0])*0.1
+            self.lr_cov_layers = torch.randn(self.A_hidden.shape[0],Rank)*0.1
+            self.lr_cov_last = torch.randn(self.A_last.shape[0],Rank)*0.1
         return
 
-    def generate_initaial_cov_matrix(self,cov_type):
+    def generate_initial_cov_matrix(self,cov_type):
         """Generate covariance matrix based on the specified type."""
         if  cov_type == 'Full':
             self.initial_cov_layers = self.cov_layers.clone()
@@ -128,4 +138,31 @@ class DeepSIC_Block (nn.Module):
             self.initial_lr_cov_layers = self.lr_cov_layers.clone()
             self.initial_lr_cov_last = self.lr_cov_last.clone()
         return
+
+    def forward_bong(self, x,z,method = 'layers'):
+        theta = self.expend_bong(z,method)
+        # Unravel theta into model parameters
+        offset = 0
+        params = []
+        for shape, size in zip(self.shapes, self.sizes):
+            params.append(theta[:,offset:offset + size].view(shape))
+            offset += size
+        for i in range(len(params)//2):
+            x = F.linear(x, params[2*i], bias=params[2*i+1])
+            activation = self.activation[i]
+            if activation !=None:
+                x = activation(x)
+        return x.squeeze(0)
+
+    def expend_bong(self,z,method='layers'):
+        """Expand parameters from vector to model parameters"""
+        if method == 'layers':
+            theta_hidden = z @ self.A_hidden + self.phi_hidden
+            theta_last = self.z_last @ self.A_last + self.phi_last
+        elif method == 'last':
+            theta_hidden = self.z_layers @ self.A_hidden + self.phi_hidden
+            theta_last = z @ self.A_last + self.phi_last
+
+        theta = torch.cat([theta_hidden, theta_last], dim=1)
+        return theta
 

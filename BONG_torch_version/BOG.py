@@ -1,8 +1,8 @@
 
-import pytorch as torch
+import torch
 import numpy as np
 
-from SSM_predict import predict_full_F, predict_full_OU, predict_diag_F, predict_diag_OU, predict_DLR_F, predict_DLR_OU
+from .SSM_predict import predict_full_F, predict_full_OU, predict_diag_F, predict_diag_OU, predict_DLR_F, predict_DLR_OU
 
 def Update_BOG_lin_full_F(mean, Cov, model, obs ,y,learning_rate, R, F, beta, Q):
     """

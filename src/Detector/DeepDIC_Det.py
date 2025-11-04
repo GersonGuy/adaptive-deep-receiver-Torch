@@ -1,10 +1,10 @@
-from DeepSIC_Block import DeepSIC_Block
+from .DeepSIC_Block import DeepSIC_Block
 from src.Pulse.projection_fn import define_projection_matrix_and_bias
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from src.Detector.base_model import base_model_generator
-from src.Utils.CovarianceType import CovarianceType
+
 
 
 
@@ -34,9 +34,9 @@ class DeepSIC_proj():
             num_antennas: int,
             num_layers: int,
             hidden_dim: int,
-            cov_type: CovarianceType = CovarianceType.FULL,
+            cov_type: str,
             init_cov_scale: float = 0.1,
-            Pulse=False,
+            Pulse = False,
             OU=True,
             F=False,
     ):
@@ -46,7 +46,7 @@ class DeepSIC_proj():
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
         self.rx_size = 2 * num_antennas
-        self.block_input_size = self.rx_size + symbol_bits * num_users
+        self.block_input_size = self.rx_size + symbol_bits * (num_users-1)
         self.Pulse = Pulse
         self.cov_type = cov_type
 
@@ -57,12 +57,12 @@ class DeepSIC_proj():
 
 
     def build_blocks(self):
-        layer_block=[]
+
         blocks = []
         base_model = base_model_generator(
             input_size=self.block_input_size,
             hidden_dim=self.hidden_dim,
-            output_size=self.symbol_bits,
+            output_size=self.symbol_bits ,
         )
 
         last_params = list(base_model.fc3.parameters())
@@ -73,6 +73,7 @@ class DeepSIC_proj():
         num_wanted_last = 30
 
         for layer_idx in range(self.num_layers):
+            layer_block = []
             for user in range(self.num_users):
                 # Define projection matrices and activation functions
                 projection_mat_hidden, phi_hidden = define_projection_matrix_and_bias(n_hidden,num_wanted_hidden)
@@ -81,7 +82,7 @@ class DeepSIC_proj():
                 block = DeepSIC_Block(
                     base_model=base_model,
                     symbol_bits=self.symbol_bits,
-                    nun_users=self.num_users,
+                    num_users=self.num_users,
                     num_antenas=self.num_antennas,
                     hidden_dim=self.hidden_dim,
                     projection_mat_hidden=projection_mat_hidden,
@@ -94,168 +95,162 @@ class DeepSIC_proj():
         return blocks
 
 
+    def soft_decode_batch (self,rx):
+        concat_prediction = None
+        for train_rx in rx:
+            prediction = self.soft_decode(train_rx)
+            if concat_prediction is None:
+                concat_prediction = prediction
+            else:
+                concat_prediction = torch.cat([concat_prediction,prediction],dim = 0)
 
+        return concat_prediction
 
 
     def soft_decode(self, rx):
         """Soft decode the received signal using the DeepSIC architecture."""
         # generate inputs for first block
-        initaial_inputs = torch.ones((1, self.block_input_size))
-        initaial_inputs[0, :self.rx_size] = rx
-        initaial_inputs[self.rx_size:] = 1 / self.symbol_bits
-        inputs = initaial_inputs
-        next_input = torch.zeros((1, self.block_input_size))
-        next_input[0, :self.rx_size] = rx
-        # Iterate over layers
-        if self.OU == True:
-            if self.cov_type != 'DLR':
-                for layer_idx in range(self.num_layers):
-                    offset = self.rx_size
-                    for user in range(self.num_users):
-                        if user == 0 and layer_idx != 0:
-                            inputs = next_input
-                        block = self.blocks[layer_idx][user]
-                        next_input[offset:offset + self.symbol_bits] = F.softmax(block.forward(inputs), dim=-1)
-                        offset += self.symbol_bits
+        inputs = torch.ones((1, self.block_input_size+self.symbol_bits))
+        inputs[0, :self.rx_size] = rx
+        inputs[0, self.rx_size:] = 0.5
+        next_input = inputs.clone()
+
+        for layer_idx in range(self.num_layers):
+            for user in range(self.num_users):
+                if user == 0 and layer_idx != 0:
                     inputs = next_input
-            else:
-                for layer_idx in range(self.num_layers):
-                    offset = self.rx_size
-                    for user in range(self.num_users):
-                        if user == 0 and layer_idx != 0:
-                            inputs = next_input
-                        block = self.blocks[layer_idx][user]
-                        next_input[offset:offset + self.symbol_bits] = F.softmax(block.forward(inputs), dim=-1)
-                        offset += self.symbol_bits
-                    inputs = next_input
+                block = self.blocks[layer_idx][user]
+                #generate inputs
+                block_input,start,end = self.generate_input(user,self.rx_size,inputs)
+
+                next_input[0,start:end] = block.forward(block_input)
+
+            inputs = next_input
+        return inputs[:, self.rx_size:]
 
 
 
 
-        else:  # add F and beta and Q
-            beta = 0.9
-            Q = 0.001 * torch.eye(block.z_layers.numel())
-            F = torch.eye(block.z_layers.numel())
-            if self.cov_type != 'DLR':
-                for layer_idx in range(self.num_layers):
-                    offset = self.rx_size
-                    for user in range(self.num_users):
-                        if user == 0 and layer_idx != 0:
-                            inputs = next_input
-                        block = self.blocks[layer_idx][user]
-                        next_input[offset:offset + self.symbol_bits] = F.softmax(block.forward(inputs), dim=-1)
-                        offset += self.symbol_bits
-                    inputs = next_input
+    def train_batch (self,train_fn,rx,symbols):
+        for train_rx , labels in zip(rx, symbols):
+            self.online_training(train_fn,train_rx,labels)
 
-            else:
-                for layer_idx in range(self.num_layers):
-                    offset = self.rx_size
-                    for user in range(self.num_users):
-                        if user == 0 and layer_idx != 0:
-                            inputs = next_input
-                        block = self.blocks[layer_idx][user]
-                        next_input[offset:offset + self.symbol_bits] = F.softmax(block.forward(inputs), dim=-1)
-                        offset += self.symbol_bits
-                    inputs = next_input
-
-        return inputs[self.rx_size:]
-
-
-
-
-    def online_training(self,train_fn,rx,symbools):
+    def online_training(self,train_fn,rx,symbols):
         """Perform online training of the DeepSIC model each block independently."""
         ## symbols : list of true symbols for each user (2d tensor)
 
         #generate inputs for first block
-        initaial_inputs = torch.ones((1,self.block_input_size))
-        initaial_inputs[0,:self.rx_size] = rx
-        initaial_inputs[self.rx_size:] = 1/self.symbol_bits
-        inputs = initaial_inputs
-        next_input = torch.zeros((1, self.block_input_size))
-        next_input[0, :self.rx_size] = rx
+        inputs = torch.ones((1, self.block_input_size+self.symbol_bits))
+        inputs[0, :self.rx_size] = rx
+        inputs[0, self.rx_size:] = 0.5
+        next_input = inputs.clone()
+        size = self.symbol_bits
+        R = torch.eye(size) * 0.1
+        size = self.symbol_bits
+        R_last = torch.eye(size) * 0.1
         # Iterate over layers
         if self.OU == True:
             if self.cov_type != 'DLR':
                 for layer_idx in range(self.num_layers):
-                    offset = self.rx_size
                     for user in range(self.num_users):
                         if user == 0 and layer_idx != 0:
                             inputs = next_input
                         block = self.blocks[layer_idx][user]
+                        # generate input
+                        block_input,start,end = self.generate_input(user,self.rx_size,inputs)
+
                         #train layers
-                        train_fn(block.z_layers,block.cov_layers,block , inputs , symbools[user] ,
-                                 0.9,
-                                 block.iniitial_cov_layers,
+                        mean_upd, cov_upd = train_fn(block.z_layers,block.cov_layers,block , block_input , symbols[user] ,
+                                 R,0.9,
+                                 block.initial_cov_layers,
                                  block.initial_mean_layers)
+                        with torch.no_grad():
+                            block.z_layers.copy_(mean_upd)
+                            block.cov_layers.copy_(cov_upd)
                         #train last layer
-                        train_fn(block.z_last, block.cov_last, block, inputs, symbools[user],
-                                 0.9,
-                                 block.iniitial_cov_last,
+                        mean_upd, cov_upd = train_fn(block.z_last, block.cov_last, block, block_input, symbols[user],
+                                 R_last,0.9,
+                                 block.initial_cov_last,
                                  block.initial_mean_last)
-                        next_input[offset:offset + self.symbol_bits] = block.forward(inputs)
-                        offset += self.symbol_bits
+                        with torch.no_grad():
+                            block.z_last.copy_(mean_upd)
+                            block.cov_last.copy_(cov_upd)
+                        next_input[0, start:end] = block.forward(block_input)
                     inputs = next_input
 
             else:
                 for layer_idx in range(self.num_layers):
-                    offset = self.rx_size
                     for user in range(self.num_users):
                         if user == 0 and layer_idx != 0:
                             inputs = next_input
                         block = self.blocks[layer_idx][user]
-                        train_fn(block.z_layers,block.diag_layers,block.lr_cov_layers ,block , inputs ,
-                                 symbools[user] ,
-                                 0.9)
-                        train_fn(block.z_last, block.diag_last, block.lr_cov_last, block, inputs,
-                                 symbools[user],
-                                 0.9)
-                        next_input[offset:offset+self.symbol_bits] = block.forward(inputs)
-                        offset += self.symbol_bits
+                        block_input,start,end = self.generate_input(user,self.rx_size,inputs)
+                        train_fn(block.z_layers,block.diag_layers,block.lr_cov_layers ,block , block_input ,
+                                 symbols[user] ,
+                                 R,0.9,
+                                 block.initial_diag_layers,
+                                 block.initial_lr_cov_layers,
+                                 block.initial_mean_layers)
+
+                        train_fn(block.z_last, block.diag_last, block.lr_cov_last, block, block_input,
+                                 symbols[user],R_last,
+                                 R_last,0.9,
+                                 block.initial_diag_last,
+                                 block.initial_lr_cov_last,
+                                 block.initial_mean_last)
+                        next_input[0, start:end] = block.forward(block_input)
                     inputs = next_input
 
 
-        else: # add F and beta and Q
+        else: # Q and F should be in different size each online train
             beta = 0.9
             Q = 0.001*torch.eye(block.z_layers.numel())
             F = torch.eye(block.z_layers.numel())
             if self.cov_type != 'DLR':
                 for layer_idx in range(self.num_layers):
-                    offset = self.rx_size
                     for user in range(self.num_users):
                         if user == 0 and layer_idx != 0:
                             inputs = next_input
                         block = self.blocks[layer_idx][user]
-                        train_fn(block.z_layers,block.cov_layers,block , inputs , symbools[user],
+                        block_input, start, end =self.generate_input(user, self.rx_size, inputs)
+                        train_fn(block.z_layers,block.cov_layers,block , block_input , symbols[user],
                                  beta,
                                  Q,
                                  F)
-                        train_fn(block.z_last, block.cov_last, block, inputs, symbools[user],
+                        train_fn(block.z_last, block.cov_last, block, block_input, symbols[user],
                                  beta,
                                  Q,
                                  F)
-                        next_input[offset:offset + self.symbol_bits] = block.forward(inputs)
-                        offset += self.symbol_bits
+                        next_input[0, start:end] = block.forward(block_input)
+
                     inputs = next_input
 
             else:
                 for layer_idx in range(self.num_layers):
-                    offset = self.rx_size
                     for user in range(self.num_users):
                         if user == 0 and layer_idx != 0:
                             inputs = next_input
                         block = self.blocks[layer_idx][user]
-                        train_fn(block.z_layers,block.cov_layers,block , inputs , symbools[user],
+                        block_input, start, end = self.generate_input(user, self.rx_size, inputs)
+                        train_fn(block.z_layers,block.cov_layers,block , block_input , symbols[user],
                                  beta,
                                  Q,
                                  F)
-                        train_fn(block.z_last, block.cov_last, block, inputs, symbools[user],
+                        train_fn(block.z_last, block.cov_last, block, block_input, symbols[user],
                                  beta,
                                  Q,
                                  F)
-                        next_input[offset:offset + self.symbol_bits] = block.forward(inputs)
-                        offset += self.symbol_bits
+                        next_input[0, start:end] = block.forward(block_input)
                     inputs = next_input
         return
 
 
+    def generate_input(self,user,rx_size,inputs):
+        rx_part = inputs[:, :rx_size]
+        soft_bits = inputs[:, rx_size:]
+
+        start = user * self.symbol_bits
+        end = start + self.symbol_bits
+        other_users = torch.cat([soft_bits[:, :start], soft_bits[:, end:]], dim=-1)
+        block_input = torch.cat([rx_part, other_users], dim=-1)
+        return block_input,start,end

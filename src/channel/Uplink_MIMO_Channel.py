@@ -1,4 +1,4 @@
-from Modulation import MODULATIONS
+from .Modulation  import MODULATIONS
 import os
 import torch
 import scipy.io
@@ -38,7 +38,7 @@ class UplinkMimoChannel:
     def load_mat_file(self):
         h_np = scipy.io.loadmat(self.path)['H']
         self.h = torch.from_numpy(h_np).to(torch.complex64)
-        self.h = self.h[:self.num_users, :self.num_antennas, :].transpose(2, 0, 1)
+        self.h = self.h[:self.num_users, :self.num_antennas, :].permute(2, 0, 1)
         self.num_frames = self.h.shape[0]
 
     @staticmethod
@@ -60,7 +60,7 @@ class UplinkMimoChannel:
         tx = self.constellation_points[s].reshape(-1, self.num_users)
         conv = self._compute_channel_signal_convolution(h, tx)
         var = 10 ** (-0.1 * snr)
-        random_noise = torch.sqrt(var) / 2 * torch.randn((2, tx.shape[0], self.num_antennas))
+        random_noise = torch.sqrt(torch.tensor(var)) / 2 * torch.randn((2, tx.shape[0], self.num_antennas))
         w = random_noise[0] + 1j * random_noise[1]
         y = conv + w
         if self.apply_non_linearity:
