@@ -57,5 +57,5 @@ def prepare_experiment_data(channel: UplinkMimoChannel, num_samples: int, num_fr
         receive_blocks = rx if frame_idx == start_frame else torch.cat([receive_blocks, rx], dim=0)
 
     dataset = torch.utils.data.TensorDataset(receive_blocks, label_blocks)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=num_frames, shuffle=False)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=num_samples, shuffle=False)
     return dataloader

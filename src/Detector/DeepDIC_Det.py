@@ -1,13 +1,9 @@
-from .DeepSIC_Block import DeepSIC_Block
+from .DeepSIC_Block import DeepSIC_Block_double_proj, DeepSIC_Block_single_proj,DeepSIC_Block_No_proj
 from src.Pulse.projection_fn import define_projection_matrix_and_bias
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from src.Detector.base_model import base_model_generator
-
-
-
-
 
 
 class DeepSIC_proj():
@@ -39,6 +35,7 @@ class DeepSIC_proj():
             Pulse = False,
             OU=True,
             F=False,
+            block_method = 'double_proj'
     ):
         self.symbol_bits = symbol_bits
         self.num_users = num_users
@@ -52,6 +49,7 @@ class DeepSIC_proj():
 
         self.OU = OU
         self.F = F
+        self.block_method = block_method.lower()
 
         self.blocks = self.build_blocks()
 
@@ -62,35 +60,64 @@ class DeepSIC_proj():
         base_model = base_model_generator(
             input_size=self.block_input_size,
             hidden_dim=self.hidden_dim,
-            output_size=self.symbol_bits ,
+            output_size=self.symbol_bits,
         )
 
         last_params = list(base_model.fc3.parameters())
         n_last = sum(p.numel() for p in last_params)
         base_params = list(base_model.fc1.parameters()) + list(base_model.fc2.parameters())
         n_hidden = sum(p.numel() for p in base_params)
+        n_total = n_hidden+n_last
         num_wanted_hidden = 150
         num_wanted_last = 30
+        num_wanted_single = 150
 
         for layer_idx in range(self.num_layers):
             layer_block = []
             for user in range(self.num_users):
-                # Define projection matrices and activation functions
-                projection_mat_hidden, phi_hidden = define_projection_matrix_and_bias(n_hidden,num_wanted_hidden)
-                projection_mat_last, phi_last = define_projection_matrix_and_bias(n_last,num_wanted_last)
+                if self.block_method == 'double_proj':
+                    # Define projection matrices and activation functions
+                    projection_mat_hidden, phi_hidden = define_projection_matrix_and_bias(n_hidden,num_wanted_hidden)
+                    projection_mat_last, phi_last = define_projection_matrix_and_bias(n_last,num_wanted_last)
 
-                block = DeepSIC_Block(
-                    base_model=base_model,
-                    symbol_bits=self.symbol_bits,
-                    num_users=self.num_users,
-                    num_antenas=self.num_antennas,
-                    hidden_dim=self.hidden_dim,
-                    projection_mat_hidden=projection_mat_hidden,
-                    projection_mat_last=projection_mat_last,
-                    phi_hidden=phi_hidden,
-                    phi_last=phi_last,
-                )
-                layer_block.append(block)
+                    block = DeepSIC_Block_double_proj(
+                        base_model=base_model,
+                        symbol_bits=self.symbol_bits,
+                        num_users=self.num_users,
+                        num_antenas=self.num_antennas,
+                        hidden_dim=self.hidden_dim,
+                        projection_mat_hidden=projection_mat_hidden,
+                        projection_mat_last=projection_mat_last,
+                        phi_hidden=phi_hidden,
+                        phi_last=phi_last,
+                        cov_type= self.cov_type
+                    )
+                    layer_block.append(block)
+                elif self.block_method == 'single_proj':
+                    # Define projection matrices and activation functions
+                    projection_mat_hidden, phi_hidden = define_projection_matrix_and_bias(n_total, num_wanted_single)
+
+                    block = DeepSIC_Block_single_proj(
+                        base_model=base_model,
+                        symbol_bits=self.symbol_bits,
+                        num_users=self.num_users,
+                        num_antenas=self.num_antennas,
+                        hidden_dim=self.hidden_dim,
+                        projection_mat_hidden=projection_mat_hidden,
+                        phi_hidden=phi_hidden,
+                        cov_type=self.cov_type
+                    )
+                    layer_block.append(block)
+
+                else:
+                    block = DeepSIC_Block_No_proj(
+                        base_model=base_model,
+                        symbol_bits=self.symbol_bits,
+                        num_users=self.num_users,
+                        num_antenas=self.num_antennas,
+                        hidden_dim=self.hidden_dim,
+                    )
+                    layer_block.append(block)
             blocks.append(layer_block)
         return blocks
 
@@ -114,7 +141,6 @@ class DeepSIC_proj():
         inputs[0, :self.rx_size] = rx
         inputs[0, self.rx_size:] = 0.5
         next_input = inputs.clone()
-
         for layer_idx in range(self.num_layers):
             for user in range(self.num_users):
                 if user == 0 and layer_idx != 0:
@@ -122,8 +148,8 @@ class DeepSIC_proj():
                 block = self.blocks[layer_idx][user]
                 #generate inputs
                 block_input,start,end = self.generate_input(user,self.rx_size,inputs)
-
-                next_input[0,start:end] = block.forward(block_input)
+                with torch.no_grad():
+                    next_input[0,self.rx_size+start:self.rx_size+end] = block.forward(block_input)
 
             inputs = next_input
         return inputs[:, self.rx_size:]
@@ -140,17 +166,17 @@ class DeepSIC_proj():
         ## symbols : list of true symbols for each user (2d tensor)
 
         #generate inputs for first block
-        inputs = torch.ones((1, self.block_input_size+self.symbol_bits))
+        inputs = torch.ones((1, self.block_input_size+self.symbol_bits),requires_grad=False)
         inputs[0, :self.rx_size] = rx
         inputs[0, self.rx_size:] = 0.5
-        next_input = inputs.clone()
+        next_input = inputs.clone().detach()
         size = self.symbol_bits
         R = torch.eye(size) * 0.1
         size = self.symbol_bits
         R_last = torch.eye(size) * 0.1
         # Iterate over layers
         if self.OU == True:
-            if self.cov_type != 'DLR':
+            if self.cov_type != 'dlr':
                 for layer_idx in range(self.num_layers):
                     for user in range(self.num_users):
                         if user == 0 and layer_idx != 0:
@@ -175,7 +201,8 @@ class DeepSIC_proj():
                         with torch.no_grad():
                             block.z_last.copy_(mean_upd)
                             block.cov_last.copy_(cov_upd)
-                        next_input[0, start:end] = block.forward(block_input)
+                            next_input[0, self.rx_size+start:self.rx_size+end] = block.forward(block_input)
+                    #print(next_input)
                     inputs = next_input
 
             else:
@@ -185,20 +212,31 @@ class DeepSIC_proj():
                             inputs = next_input
                         block = self.blocks[layer_idx][user]
                         block_input,start,end = self.generate_input(user,self.rx_size,inputs)
-                        train_fn(block.z_layers,block.diag_layers,block.lr_cov_layers ,block , block_input ,
+                        mean_upd, prec_diag_upd, prec_low_rank_upd =train_fn(block.z_layers,block.diag_layers,block.lr_cov_layers ,block , block_input ,
                                  symbols[user] ,
                                  R,0.9,
                                  block.initial_diag_layers,
                                  block.initial_lr_cov_layers,
                                  block.initial_mean_layers)
+                        with torch.no_grad():
+                            block.z_layers.copy_(mean_upd)
+                            block.diag_layers.copy_(prec_diag_upd)
+                            block.lr_cov_layers.copy_(prec_low_rank_upd)
 
-                        train_fn(block.z_last, block.diag_last, block.lr_cov_last, block, block_input,
-                                 symbols[user],R_last,
+                        mean_upd, prec_diag_upd, prec_low_rank_upd = train_fn(block.z_last, block.diag_last, block.lr_cov_last, block, block_input,
+                                 symbols[user],
                                  R_last,0.9,
                                  block.initial_diag_last,
                                  block.initial_lr_cov_last,
                                  block.initial_mean_last)
-                        next_input[0, start:end] = block.forward(block_input)
+                        with torch.no_grad():
+                            block.z_last.copy_(mean_upd)
+                            block.diag_last.copy_(prec_diag_upd)
+                            block.lr_cov_last.copy_(prec_low_rank_upd)
+                            next_input[0, self.rx_size + start:self.rx_size + end] = block.forward(block_input)
+                            assert not torch.isnan(next_input).any(), "NaN detected!"
+
+                    print(next_input)
                     inputs = next_input
 
 

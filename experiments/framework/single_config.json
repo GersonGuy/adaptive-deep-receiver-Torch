@@ -6,7 +6,8 @@
     "init_param_cov": 0.1,
     "Pulse": false,
     "OU": true,
-    "F": false
+    "F": false,
+    "projection_mode": "double_proj"
   },
   "channel": {
     "modulation": "QPSK",
@@ -21,12 +22,12 @@
     "track_frames": 96,
     "symbols_per_frame": 64,
     "pilot_per_frame": 4,
-    "test_dim": 100000,
+    "test_dim": 100,
     "seed": 42
   },
   "algorithm": {
     "method": "bong",
-    "covariance_type": "full",
+    "covariance_type": "diag",
     "reparameterized": false,
     "dynamics_decay": 0.999,
     "obs_cov_scale": 0.1,

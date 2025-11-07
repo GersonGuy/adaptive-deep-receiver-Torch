@@ -18,7 +18,7 @@ def define_projection_matrix_and_bias(total_parameter,num_wanted_params,method='
 
     if method == 'xavier':
         torch.nn.init.xavier_uniform_(A)
-        torch.nn.init.xavier_uniform_(phi)
+        #torch.nn.init.xavier_uniform_(phi)
     elif method == 'normal':
         torch.nn.init.normal_(A, mean=0.0, std=1.0)
         torch.nn.init.normal_(phi, mean=0.0, std=1.0)

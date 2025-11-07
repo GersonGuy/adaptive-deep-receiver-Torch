@@ -30,7 +30,12 @@ def Update_BOG_lin_full_F(mean, Cov, model, obs ,y,learning_rate, R, F, beta, Q)
     predict_mean ,predict_cov= predict_full_F(mean, Cov, F, beta, Q)
 
     y_pred = model(obs)
-    H = torch.autograd.functional.jacobian(model, obs)
+    if mean is model.z_layers:
+        z = model.z_layers.detach().clone().requires_grad_(True)
+        H = torch.func.jacrev(lambda z_: model.forward_bong(obs, z_, 'layers'))(z)
+    elif mean is model.z_last:
+        z = model.z_last.detach().clone().requires_grad_(True)
+        H = torch.func.jacrev(lambda z_: model.forward_bong(obs, z_, 'last'))(z)
     update_term = H.T @ torch.linalg.inv(R) @ (y - y_pred)
     R_inv = torch.linalg.inv(R)
     prec_update = (
@@ -72,7 +77,12 @@ def Update_BOG_lin_full_OU(mean, Cov, model, obs, y, learning_rate, R, gamma, in
     predict_mean, predict_cov = predict_full_OU(mean, Cov, gamma, initial_Cov, init_mean)
 
     y_pred = model(obs)
-    H = torch.autograd.functional.jacobian(model, obs)
+    if mean is model.z_layers:
+        z = model.z_layers.detach().clone().requires_grad_(True)
+        H = torch.func.jacrev(lambda z_: model.forward_bong(obs, z_, 'layers'))(z)
+    elif mean is model.z_last:
+        z = model.z_last.detach().clone().requires_grad_(True)
+        H = torch.func.jacrev(lambda z_: model.forward_bong(obs, z_, 'last'))(z)
     update_term = H.T @ torch.linalg.inv(R) @ (y - y_pred)
     R_inv = torch.linalg.inv(R)
     prec_update = (
@@ -115,7 +125,12 @@ def Update_BOG_lin_DLR_F(mean, prec_diag, prec_low_rank, model, obs, y, learning
     predcit_mean, prec_diag, prec_lr = predict_DLR_F(mean, prec_diag, prec_low_rank, F, beta, Q)
 
     y_pred = model(obs)
-    H = torch.autograd.functional.jacobian(model, obs)
+    if mean is model.z_layers:
+        z = model.z_layers.detach().clone().requires_grad_(True)
+        H = torch.func.jacrev(lambda z_: model.forward_bong(obs, z_, 'layers'))(z)
+    elif mean is model.z_last:
+        z = model.z_last.detach().clone().requires_grad_(True)
+        H = torch.func.jacrev(lambda z_: model.forward_bong(obs, z_, 'last'))(z)
 
     P, L = prec_low_rank.shape
     R_chol = torch.linalg.cholesky(R)
@@ -162,7 +177,12 @@ def Update_BOG_lin_DLR_OU(mean, prec_diag, prec_low_rank, model, obs, y, learnin
     predcit_mean, prec_diag, prec_lr = predict_DLR_OU(mean, prec_diag, prec_low_rank, gamma, initial_Cov, init_mean)
 
     y_pred = model(obs)
-    H = torch.autograd.functional.jacobian(model, obs)
+    if mean is model.z_layers:
+        z = model.z_layers.detach().clone().requires_grad_(True)
+        H = torch.func.jacrev(lambda z_: model.forward_bong(obs, z_, 'layers'))(z)
+    elif mean is model.z_last:
+        z = model.z_last.detach().clone().requires_grad_(True)
+        H = torch.func.jacrev(lambda z_: model.forward_bong(obs, z_, 'last'))(z)
 
     P, L = prec_low_rank.shape
     R_chol = torch.linalg.cholesky(R)

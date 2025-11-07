@@ -30,7 +30,8 @@ def create_model(config):
             init_cov_scale= model_config['init_param_cov'],
             Pulse=model_config["Pulse"],
             OU= model_config["OU"],
-            F = model_config["F"]
+            F = model_config["F"],
+            block_method =model_config['projection_mode']
         )
 
 
@@ -169,7 +170,7 @@ def run_experiment(config):
     test_dataloader = prepare_experiment_data(
         channel=channel,
         num_samples=config['experiment']['test_dim'],
-        num_frames=total_frames,
+        num_frames=total_frames+3,
         snr=config['channel']['snr'],
     )
 
@@ -195,8 +196,8 @@ def run_experiment(config):
         ber = evaluate_model(detector,test_rx, test_label)
         track_ber.append(ber)
     # generate results
-    print(sync_ber,track_ber)
-    return {training_time,inference_time,sync_ber,track_ber},detector
+
+    return (training_time,inference_time,sync_ber,track_ber),detector
 
 
 
