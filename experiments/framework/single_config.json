@@ -7,7 +7,7 @@
     "Pulse": false,
     "OU": true,
     "F": false,
-    "projection_mode": "double_proj"
+    "projection_mode": "single_proj"
   },
   "channel": {
     "modulation": "QPSK",
@@ -27,7 +27,7 @@
   },
   "algorithm": {
     "method": "bong",
-    "covariance_type": "diag",
+    "covariance_type": "full",
     "reparameterized": false,
     "dynamics_decay": 0.999,
     "obs_cov_scale": 0.1,

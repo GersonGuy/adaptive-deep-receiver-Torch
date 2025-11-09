@@ -2,10 +2,12 @@ import torch
 import time
 import json
 import math
+
+from sympy import false
 from tqdm import tqdm
 from experiments.framework.read_config import load_config,validate_config,clean_config
 from src.channel.Uplink_MIMO_Channel import UplinkMimoChannel
-from src.Detector.DeepDIC_Det import DeepSIC_proj
+from src.Detector.DeepSIC_Det import DeepSIC_proj,DeepSIC
 from src.channel.Modulation import MODULATIONS
 from BONG_torch_version import BONG,BOG
 from src.Utils.utils import prepare_experiment_data
@@ -20,20 +22,34 @@ def create_model(config):
     model_type = model_config['type'].lower()
 
     if model_type == 'deepsic':
-        detector = DeepSIC_proj(
-            symbol_bits = int(torch.log2(torch.tensor(len(MODULATIONS[channel_config['modulation']])))),
-            num_users=channel_config['num_users'],
-            num_antennas=channel_config['num_antennas'],
-            num_layers=model_config['num_layers'],
-            hidden_dim=model_config['hidden_dim'],
-            cov_type= config['algorithm']['covariance_type'],
-            init_cov_scale= model_config['init_param_cov'],
-            Pulse=model_config["Pulse"],
-            OU= model_config["OU"],
-            F = model_config["F"],
-            block_method =model_config['projection_mode']
-        )
-
+        if model_config['Pulse'] == True:
+            detector = DeepSIC_proj(
+                symbol_bits = int(torch.log2(torch.tensor(len(MODULATIONS[channel_config['modulation']])))),
+                num_users=channel_config['num_users'],
+                num_antennas=channel_config['num_antennas'],
+                num_layers=model_config['num_layers'],
+                hidden_dim=model_config['hidden_dim'],
+                cov_type= config['algorithm']['covariance_type'],
+                init_cov_scale= model_config['init_param_cov'],
+                Pulse=model_config["Pulse"],
+                OU= model_config["OU"],
+                F = model_config["F"],
+                block_method =model_config['projection_mode']
+            )
+        else:
+            detector=DeepSIC(
+                symbol_bits = int(torch.log2(torch.tensor(len(MODULATIONS[channel_config['modulation']])))),
+                num_users=channel_config['num_users'],
+                num_antennas=channel_config['num_antennas'],
+                num_layers=model_config['num_layers'],
+                hidden_dim=model_config['hidden_dim'],
+                cov_type= config['algorithm']['covariance_type'],
+                init_cov_scale= model_config['init_param_cov'],
+                Pulse=model_config["Pulse"],
+                OU= model_config["OU"],
+                F = model_config["F"],
+                block_method =model_config['projection_mode']
+            )
 
     else:
         pass
@@ -196,6 +212,9 @@ def run_experiment(config):
         ber = evaluate_model(detector,test_rx, test_label)
         track_ber.append(ber)
     # generate results
+
+    track_mean_BER = torch.mean(torch.tensor(track_ber))
+    sync_ber_mean_BER = torch.mean(torch.tensor(sync_ber))
 
     return (training_time,inference_time,sync_ber,track_ber),detector
 

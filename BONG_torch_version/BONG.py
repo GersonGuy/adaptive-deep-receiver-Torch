@@ -285,7 +285,7 @@ def Update_BONG_lin_DLR_OU(mean, prec_diag, prec_low_rank, model, obs,y, R, gamm
         H = torch.func.jacrev(lambda z_: model.forward_bong(obs, z_, 'last'))(z)
     P, L = prec_low_rank.shape
     R_chol = torch.linalg.cholesky(R)
-    A = torch.linalg.solve_triangular(R_chol, torch.eye(R.shape[0]),upper = False).T
+    A = torch.linalg.solve(R_chol, torch.eye(R.shape[0])).T
     HTA = H.T @ A
     prec_lr_tilde = torch.cat((prec_low_rank, HTA), dim=1)
     _, L_tilde = prec_lr_tilde.shape
@@ -298,9 +298,9 @@ def Update_BONG_lin_DLR_OU(mean, prec_diag, prec_low_rank, model, obs,y, R, gamm
     G = torch.linalg.pinv(M)  # matrix that inv in woodbury identity
 
     # Update step
-    AAT = A @ A.T
-    term1 = HTA @ AAT / (prec_diag.unsqueeze(1)+10**(-6))
-    term2 = (Dinv_Ltilde @ G) @ (Dinv_Ltilde.T @ (HTA @ AAT))
+    #AAT = A @ A.T
+    term1 = HTA @ A.T / (prec_diag.unsqueeze(1)+10**(-6))
+    term2 = (Dinv_Ltilde @ G) @ (Dinv_Ltilde.T @ (HTA @ A.T))
     mean_update = term1 - term2
     mean_upd = predict_mean + mean_update @ (y - y_pred)
 
@@ -320,6 +320,19 @@ def Update_BONG_lin_DLR_OU(mean, prec_diag, prec_low_rank, model, obs,y, R, gamm
     extra_prec_lr = U_extra * S_extra
     add_diag = torch.einsum("ij,ij->i", extra_prec_lr, extra_prec_lr)
     prec_diag_upd = prec_diag + add_diag
+
+    with torch.no_grad():
+            mean_change = (mean_upd - mean).abs().mean()
+
+            K_mean = mean_update.abs().mean()
+
+            err = (y - y_pred).abs().mean()
+
+            print(f"[DEBUG] mean_change={mean_change.item():.4e} | "
+                  f"K_mean={K_mean.item():.4e} | "
+                  f"err={err.item():.4e} | "
+                  f"cov_min={prec_diag_upd.min().item():.4e} | "
+                  f"cov_max={prec_low_rank_upd.max().item():.4e}")
 
     return mean_upd, prec_diag_upd, prec_low_rank_upd
 
