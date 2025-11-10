@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .base_model import base_model_generator
 
 class DeepSIC_Block_double_proj (nn.Module):
     def __init__(self,base_model, symbol_bits, num_users, num_antenas,hidden_dim ,projection_mat_hidden ,projection_mat_last,
@@ -99,16 +100,16 @@ class DeepSIC_Block_double_proj (nn.Module):
     def generate_cov_matrix(self,cov_type,Rank):
         """Generate covariance matrix based on the specified type."""
         if  cov_type == 'full':
-            self.cov_layers = torch.eye(self.A_hidden.shape[0])*0.1
-            self.cov_last = torch.eye(self.A_last.shape[0])*0.1
+            self.cov_layers = nn.Parameter(torch.eye(self.A_hidden.shape[0])*0.1)
+            self.cov_last = nn.Parameter(torch.eye(self.A_last.shape[0])*0.1)
         elif cov_type == 'diag':
-            self.cov_layers = torch.ones(self.A_hidden.shape[0])*0.1
-            self.cov_last = torch.ones(self.A_last.shape[0])*0.1
+            self.cov_layers = nn.Parameter(torch.ones(self.A_hidden.shape[0])*0.1)
+            self.cov_last = nn.Parameter(torch.ones(self.A_last.shape[0])*0.1)
         else:
-            self.diag_layers = torch.ones(self.A_hidden.shape[0])*10
-            self.diag_last = torch.ones(self.A_last.shape[0])*10
-            self.lr_cov_layers = torch.randn(self.A_hidden.shape[0],Rank)*10
-            self.lr_cov_last = torch.randn(self.A_last.shape[0],15)*10
+            self.diag_layers = nn.Parameter(torch.ones(self.A_hidden.shape[0])*10)
+            self.diag_last = nn.Parameter(torch.ones(self.A_last.shape[0])*10)
+            self.lr_cov_layers = nn.Parameter(torch.randn(self.A_hidden.shape[0],Rank)*10)
+            self.lr_cov_last = nn.Parameter(torch.randn(self.A_last.shape[0],15)*10)
         return
 
     def generate_initial_cov_matrix(self,cov_type):
@@ -185,7 +186,7 @@ class DeepSIC_Block_single_proj (nn.Module):
         self.phi_hidden = phi_hidden
 
         # Latent variables
-        self.z_layers = nn.Parameter(0.01*torch.randn(self.A_hidden.shape[0]))
+        self.z_layers = nn.Parameter(0.1*torch.randn(self.A_hidden.shape[0]))
 
         #generate covariance matrices
         self.generate_cov_matrix(cov_type,Rank)
@@ -243,14 +244,14 @@ class DeepSIC_Block_single_proj (nn.Module):
     def generate_cov_matrix(self,cov_type,Rank):
         """Generate covariance matrix based on the specified type."""
         if  cov_type == 'full':
-            self.cov_layers = torch.eye(self.A_hidden.shape[0])*0.1
+            self.cov_layers = nn.Parameter(torch.eye(self.A_hidden.shape[0])*0.1)
 
         elif cov_type == 'diag':
-            self.cov_layers = torch.ones(self.A_hidden.shape[0])*0.1
+            self.cov_layers = nn.Parameter(torch.ones(self.A_hidden.shape[0])*0.1)
 
         else:
-            self.diag_layers = torch.ones(self.A_hidden.shape[0])*10
-            self.lr_cov_layers = torch.randn(self.A_hidden.shape[0],Rank)*10
+            self.diag_layers = nn.Parameter(torch.ones(self.A_hidden.shape[0])*10)
+            self.lr_cov_layers = nn.Parameter(torch.randn(self.A_hidden.shape[0],Rank)*10)
         return
 
     def generate_initial_cov_matrix(self,cov_type):
@@ -322,7 +323,12 @@ class DeepSIC_Block_No_proj(nn.Module):
 
 
         # Latent variables
-        self.z_layers = nn.Parameter(0.01 * torch.randn(self.total_params))
+        self.z_layers = nn.Parameter(0.1*torch.randn(self.total_params))
+
+        self.generate_mean()
+
+        self.z_layers = nn.Parameter(self.flat_params)
+
 
         # generate covariance matrices
         self.generate_cov_matrix(cov_type, Rank)
@@ -365,14 +371,14 @@ class DeepSIC_Block_No_proj(nn.Module):
     def generate_cov_matrix(self, cov_type, Rank):
         """Generate covariance matrix based on the specified type."""
         if cov_type == 'full':
-            self.cov_layers = torch.eye(self.total_params) * 0.1
+            self.cov_layers = nn.Parameter(torch.eye(self.total_params))
 
         elif cov_type == 'diag':
-            self.cov_layers = torch.ones(self.total_params) * 0.1
+            self.cov_layers = nn.Parameter(torch.ones(self.total_params))
 
         else:
-            self.diag_layers = torch.ones(self.total_params) * 10
-            self.lr_cov_layers = torch.randn(self.total_params, Rank) * 10
+            self.diag_layers = nn.Parameter(torch.ones(self.total_params) * 10)
+            self.lr_cov_layers = nn.Parameter(torch.randn(self.total_params, Rank) * 10)
         return
 
     def generate_initial_cov_matrix(self, cov_type):
@@ -401,4 +407,10 @@ class DeepSIC_Block_No_proj(nn.Module):
             if activation != None:
                 x = activation(x)
         return x.squeeze(0)
+
+
+    def generate_mean(self):
+        model = base_model_generator(self.num_antenas*2+self.symbol_bits*(self.num_users),self.hidden_dim,self.symbol_bits)
+        params = [p.detach().view(-1) for p in model.parameters()]
+        self.flat_params = torch.cat(params)
 

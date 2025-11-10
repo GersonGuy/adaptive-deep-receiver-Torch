@@ -79,11 +79,27 @@ def Update_BONG_lin_full_OU(mean, Cov, model, obs,y, R, gamma, initial_cov, init
         z = model.z_last.detach().clone().requires_grad_(True)
         H = torch.func.jacrev(lambda z_: model.forward_bong(obs,z_, 'last'))(z)
 
+    #print("H.mean=", H.abs().mean().item(), "H.norm=", H.norm().item())
+    w = (1+torch.norm(y - y_pred))**(-0.5)
     S = R + H @ predict_cov @ H.T
     C = predict_cov @ H.T
-    K = torch.linalg.lstsq(S.T, C.T).solution.T
+    #K = torch.linalg.lstsq(S.T, C.T).solution.T
+    K = torch.linalg.lstsq(S, C.T).solution.T
     mean_upd = predict_mean + K @ (y - y_pred)
-    cov_upd = (torch.eye(Cov.shape[0]) - K @ H) @ predict_cov
+    cov_upd = predict_cov- K @ S @ K.T
+
+    """with torch.no_grad():
+            mean_change = (mean_upd - mean).abs().mean()
+
+            K_mean = K.abs().mean()
+
+            err = (y - y_pred).abs().mean()
+
+            print(f"[DEBUG] mean_change={mean_change.item():.4e} | "
+                  f"K_mean={K_mean.item():.4e} | "
+                  f"err={err.item():.4e} | "
+                  f"cov_min={cov_upd.min().item():.4e} | "
+                  f"cov_max={cov_upd.max().item():.4e}")"""
 
     return mean_upd, cov_upd
 

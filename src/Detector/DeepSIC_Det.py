@@ -329,7 +329,7 @@ class DeepSIC():
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
         self.rx_size = 2 * num_antennas
-        self.block_input_size = self.rx_size + symbol_bits * (num_users-1)
+        self.block_input_size = self.rx_size + symbol_bits * (num_users)
         self.cov_type = cov_type
 
         self.OU = OU
@@ -376,7 +376,7 @@ class DeepSIC():
     def soft_decode(self, rx):
         """Soft decode the received signal using the DeepSIC architecture."""
         # generate inputs for first block
-        inputs = torch.ones((1, self.block_input_size + self.symbol_bits))
+        inputs = torch.ones((1, self.block_input_size ))
         inputs[0, :self.rx_size] = rx
         inputs[0, self.rx_size:] = 0.5
         next_input = inputs.clone()
@@ -388,7 +388,7 @@ class DeepSIC():
                 # generate inputs
                 block_input, start, end = self.generate_input(user, self.rx_size, inputs)
                 with torch.no_grad():
-                    next_input[0, self.rx_size + start:self.rx_size + end] = block.forward(block_input)
+                    next_input[0, self.rx_size + start:self.rx_size + end] = block.forward(inputs)
 
             inputs = next_input
         return inputs[:, self.rx_size:]
@@ -403,14 +403,14 @@ class DeepSIC():
         ## symbols : list of true symbols for each user (2d tensor)
 
         # generate inputs for first block
-        inputs = torch.ones((1, self.block_input_size + self.symbol_bits), requires_grad=False)
+        inputs = torch.ones((1, self.block_input_size), requires_grad=False)
         inputs[0, :self.rx_size] = rx
         inputs[0, self.rx_size:] = 0.5
         next_input = inputs.clone().detach()
         size = self.symbol_bits
-        R = torch.eye(size) * 0.1
+        R = torch.eye(size) * 0.001
         size = self.symbol_bits
-        R_last = torch.eye(size) * 0.1
+        R_last = torch.eye(size) * 0.001
         # Iterate over layers
         if self.OU == True:
             if self.cov_type != 'dlr':
@@ -419,18 +419,17 @@ class DeepSIC():
                         block = self.blocks[layer_idx][user]
                         # generate input
                         block_input, start, end = self.generate_input(user, self.rx_size, inputs)
-
                         # train layers
-                        mean_upd, cov_upd = train_fn(block.z_layers, block.cov_layers, block, block_input,
+                        mean_upd, cov_upd = train_fn(block.z_layers, block.cov_layers, block, inputs,
                                                      symbols[user],
-                                                     R, 0.9,
+                                                     R, 0.95,
                                                      block.initial_cov_layers,
                                                      block.initial_mean_layers)
                         with torch.no_grad():
                             block.z_layers.copy_(mean_upd)
                             block.cov_layers.copy_(cov_upd)
                         # train last layer
-                        next_input[0, self.rx_size + start:self.rx_size + end] = block.forward(block_input)
+                        next_input[0, self.rx_size + start:self.rx_size + end] = block.forward(inputs)
                     # print(next_input)
                     inputs = next_input
 
