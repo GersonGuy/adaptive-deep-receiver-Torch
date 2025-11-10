@@ -2,7 +2,7 @@
   "model": {
     "type": "deepsic",
     "num_layers": 4,
-    "hidden_dim": 24,
+    "hidden_dim": 32,
     "init_param_cov": 0.1,
     "Pulse": false,
     "OU": true,

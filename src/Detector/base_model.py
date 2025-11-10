@@ -8,7 +8,7 @@ class base_model_generator(nn.Module):
 
         super().__init__()
         self.fc1 = nn.Linear(input_size,hidden_dim,bias = True)
-        self.act1 = nn.LeakyReLU(0.3)
+        self.act1 = nn.ReLU()
         self.fc2 = nn.Linear(hidden_dim, output_size,bias=True)
 
     def forward(self, x):

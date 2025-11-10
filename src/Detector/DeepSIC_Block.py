@@ -371,10 +371,10 @@ class DeepSIC_Block_No_proj(nn.Module):
     def generate_cov_matrix(self, cov_type, Rank):
         """Generate covariance matrix based on the specified type."""
         if cov_type == 'full':
-            self.cov_layers = nn.Parameter(torch.eye(self.total_params))
+            self.cov_layers = nn.Parameter(torch.eye(self.total_params))*0.0001
 
         elif cov_type == 'diag':
-            self.cov_layers = nn.Parameter(torch.ones(self.total_params))
+            self.cov_layers = nn.Parameter(torch.ones(self.total_params))*0.0001
 
         else:
             self.diag_layers = nn.Parameter(torch.ones(self.total_params) * 10)

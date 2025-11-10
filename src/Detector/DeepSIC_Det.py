@@ -408,9 +408,9 @@ class DeepSIC():
         inputs[0, self.rx_size:] = 0.5
         next_input = inputs.clone().detach()
         size = self.symbol_bits
-        R = torch.eye(size) * 0.001
+        R = torch.eye(size) * 0.00001
         size = self.symbol_bits
-        R_last = torch.eye(size) * 0.001
+        R_last = torch.eye(size) * 0.00001
         # Iterate over layers
         if self.OU == True:
             if self.cov_type != 'dlr':
@@ -422,7 +422,7 @@ class DeepSIC():
                         # train layers
                         mean_upd, cov_upd = train_fn(block.z_layers, block.cov_layers, block, inputs,
                                                      symbols[user],
-                                                     R, 0.95,
+                                                     R, 1,
                                                      block.initial_cov_layers,
                                                      block.initial_mean_layers)
                         with torch.no_grad():
